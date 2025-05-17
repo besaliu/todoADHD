@@ -1,15 +1,17 @@
+import { NavigationProp, useNavigation } from '@react-navigation/native';
 import React from "react";
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  StyleSheet, 
+import {
   FlatList,
-  Alert 
+  ImageBackground,
+  Text,
+  TouchableOpacity,
+  View
 } from "react-native";
-import { useNavigation, NavigationProp } from '@react-navigation/native';
-import { RootStackParamList } from '../types';
 import { useSpaceContext } from "../context/SpaceContext";
+import { useTaskContext } from "../context/TaskContext";
+import { spaceListStyles as styles } from '../styles/components';
+import { RootStackParamList, Space } from '../utils/types';
+import ProgressBar from "./ProgressBar";
 
 type SpaceListProps = {
   onAddNew?: () => void;
@@ -17,16 +19,54 @@ type SpaceListProps = {
 
 const SpaceList = ({ onAddNew }: SpaceListProps) => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-  const { spaces, setSelectedSpace, deleteSpace } = useSpaceContext();
+  const { spaces, setSelectedSpace } = useSpaceContext();
+  const { allTasks } = useTaskContext();
 
-  const confirmDelete = (spaceId: string, spaceName: string) => {
-    Alert.alert(
-      "Delete Space",
-      `Are you sure you want to delete "${spaceName}"? All tasks in this space will also be deleted.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => deleteSpace(spaceId) }
-      ]
+  const getSpaceCompletion = (spaceId: string) => {
+    const spaceTasks = allTasks.filter(task => task.spaceId === spaceId);
+    const total = spaceTasks.length;
+    const completed = spaceTasks.filter(task => task.completed).length;
+    const percentage = total === 0 ? 0 : Math.round((completed / total) * 100);
+    
+    return { completed, total, percentage };
+  };
+
+  const renderSpaceContent = (item: Space, completion: ReturnType<typeof getSpaceCompletion>) => {
+    const ContentWrapper = ({ children }: { children: React.ReactNode }) => (
+      <View style={styles.contentOverlay}>
+        <Text style={styles.spaceText}>{item.name}</Text>
+        <View style={styles.progressSummary}>
+          <Text style={styles.progressText}>
+            {completion.completed}/{completion.total} tasks completed
+          </Text>
+        </View>
+        <ProgressBar 
+          percentage={completion.percentage}
+          height={8}
+          fillColor="#3c096c"
+          backgroundColor="rgba(240, 208, 255, 0.7)"
+          style={styles.progressBar}
+        />
+        {children}
+      </View>
+    );
+
+    if (item.imageUri) {
+      return (
+        <ImageBackground
+          source={{ uri: item.imageUri }}
+          style={styles.backgroundImage}
+          imageStyle={styles.backgroundImageStyle}
+        >
+          <ContentWrapper>{null}</ContentWrapper>
+        </ImageBackground>
+      );
+    }
+
+    return (
+      <View style={[styles.backgroundImage, styles.defaultBackground]}>
+        <ContentWrapper>{null}</ContentWrapper>
+      </View>
     );
   };
 
@@ -35,8 +75,10 @@ const SpaceList = ({ onAddNew }: SpaceListProps) => {
       data={spaces}
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.listContainer}
-      renderItem={({ item }) => (
-        <View style={styles.spaceCard}>
+      renderItem={({ item }) => {
+        const completion = getSpaceCompletion(item.id);
+        
+        return (
           <TouchableOpacity
             style={styles.spaceButton}
             onPress={() => {
@@ -44,16 +86,10 @@ const SpaceList = ({ onAddNew }: SpaceListProps) => {
               navigation.navigate("Space");
             }}
           >
-            <Text style={styles.spaceText}>{item.name}</Text>
+            {renderSpaceContent(item, completion)}
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => confirmDelete(item.id, item.name)}
-          >
-            <Text style={styles.deleteText}>✕</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        );
+      }}
       ListEmptyComponent={
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No spaces added yet. Create your first space!</Text>
@@ -70,62 +106,5 @@ const SpaceList = ({ onAddNew }: SpaceListProps) => {
     />
   );
 };
-
-const styles = StyleSheet.create({
-  listContainer: {
-    paddingTop: 20,
-  },
-  spaceCard: {
-    flexDirection: "row",
-    marginBottom: 12,
-    alignItems: "center",
-  },
-  spaceButton: {
-    flex: 1,
-    padding: 16,
-    backgroundColor: "#e0aaff",
-    borderRadius: 12,
-  },
-  spaceText: {
-    fontSize: 18,
-    color: "#3c096c",
-  },
-  deleteButton: {
-    marginLeft: 10,
-    backgroundColor: "#FF6B6B",
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  deleteText: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  emptyContainer: {
-    alignItems: "center",
-    marginTop: 30,
-  },
-  emptyText: {
-    textAlign: "center",
-    fontSize: 16,
-    color: "#888",
-    fontStyle: "italic",
-    marginBottom: 20,
-  },
-  emptyAddButton: {
-    backgroundColor: "#CDB4DB",
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 25,
-  },
-  emptyAddText: {
-    color: "#3c096c",
-    fontWeight: "700",
-    fontSize: 16,
-  }
-});
 
 export default SpaceList;

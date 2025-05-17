@@ -1,48 +1,142 @@
-import React, { useState } from "react";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import React, { useEffect, useState } from "react";
 import {
-  View,
+  Alert,
+  Platform,
+  Switch,
+  Text,
   TextInput,
   TouchableOpacity,
-  Text,
-  StyleSheet,
-  Platform,
+  View
 } from "react-native";
-import { useTaskContext } from "../context/TaskContext";
-import { Task } from "../types";
 import uuid from "react-native-uuid";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import { useTaskContext } from "../context/TaskContext";
+import { addTaskStyles as styles } from '../styles/components';
+import { requestNotificationsPermissions, scheduleTaskNotifications } from "../utils/notifications";
+import { RecurrencePattern, Task } from "../utils/types";
 
 const PRIORITIES: Task["priority"][] = ["low", "medium", "high"];
+const RECURRENCE_OPTIONS: RecurrencePattern[] = ["none", "daily", "weekly", "monthly"];
 
 type AddTaskProps = {
   onClose: () => void;
-   spaceId: string;
+  spaceId: string;
 };
 
 const AddTask = ({ onClose, spaceId }: AddTaskProps) => {
-  const [dueDate, setDueDate] = useState<Date | null>(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<Task["priority"]>("medium");
+  const [dueDate, setDueDate] = useState<Date>(() => {
+    const now = new Date();
+    // Round to the nearest hour
+    now.setMinutes(0, 0, 0);
+    now.setHours(now.getHours() + 1);
+    return now;
+  });
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [recurrence, setRecurrence] = useState<RecurrencePattern>("none");
   const { addTask } = useTaskContext();
 
-  const handleAdd = () => {
-    if (!title.trim() || !spaceId) return; // require spaceId!
+  useEffect(() => {
+    requestNotificationsPermissions();
+  }, []);
+
+  const handleAdd = async () => {
+    if (!title.trim() || !spaceId) return;
+
+    // Validate that the due date is not in the past
+    if (dueDate < new Date()) {
+      Alert.alert(
+        "Invalid Date",
+        "Due date cannot be in the past. Please select a future date and time.",
+        [{ text: "OK" }]
+      );
+      return;
+    }
 
     const newTask: Task = {
-      id: uuid.v4().toString(),  
+      id: uuid.v4().toString(),
       title,
       completed: false,
       priority,
-      dueDate: dueDate ? dueDate.toISOString() : undefined,
-      spaceId, // <- assign the current spaceId here!
+      dueDate: dueDate.toISOString(),
+      spaceId,
+      recurrence,
+      notificationsEnabled,
+      nextNotification: undefined,
     };
 
     addTask(newTask);
+
+    if (notificationsEnabled) {
+      await scheduleTaskNotifications(newTask);
+    }
+
     setTitle("");
     setPriority("medium");
-    setDueDate(null);
+    setDueDate(new Date());
+    setRecurrence("none");
+    setNotificationsEnabled(true);
     onClose();
+  };
+
+  const handleDateChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+
+    if (selectedDate) {
+      const newDate = new Date(dueDate);
+      newDate.setFullYear(selectedDate.getFullYear());
+      newDate.setMonth(selectedDate.getMonth());
+      newDate.setDate(selectedDate.getDate());
+      setDueDate(newDate);
+
+      // On Android, show time picker after date is selected
+      if (Platform.OS === 'android') {
+        setTimeout(() => setShowTimePicker(true), 500);
+      }
+    }
+  };
+
+  const handleTimeChange = (event: any, selectedTime?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+    }
+
+    if (selectedTime) {
+      const newDate = new Date(dueDate);
+      newDate.setHours(selectedTime.getHours());
+      newDate.setMinutes(selectedTime.getMinutes());
+      setDueDate(newDate);
+    }
+  };
+
+  const formatDate = (date: Date) => {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return "Today";
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return "Tomorrow";
+    } else {
+      return date.toLocaleDateString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+  };
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString([], { 
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   };
 
   return (
@@ -54,6 +148,46 @@ const AddTask = ({ onClose, spaceId }: AddTaskProps) => {
         placeholderTextColor="#999"
         style={styles.input}
       />
+
+      <Text style={styles.label}>Due Date</Text>
+      <View style={styles.dueDateContainer}>
+        <TouchableOpacity 
+          style={[styles.dueDateButton]} 
+          onPress={() => setShowDatePicker(true)}
+        >
+          <Text style={styles.dueDateButtonText}>
+            📅 {formatDate(dueDate)}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={[styles.dueDateButton]} 
+          onPress={() => setShowTimePicker(true)}
+        >
+          <Text style={styles.dueDateButtonText}>
+            ⏰ {formatTime(dueDate)}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {showDatePicker && (
+        <DateTimePicker
+          value={dueDate}
+          mode="date"
+          display="default"
+          onChange={handleDateChange}
+          minimumDate={new Date()}
+        />
+      )}
+
+      {showTimePicker && (
+        <DateTimePicker
+          value={dueDate}
+          mode="time"
+          display="default"
+          onChange={handleTimeChange}
+        />
+      )}
 
       <Text style={styles.label}>Priority</Text>
       <View style={styles.priorityContainer}>
@@ -73,119 +207,34 @@ const AddTask = ({ onClose, spaceId }: AddTaskProps) => {
         ))}
       </View>
 
-      <TouchableOpacity style={styles.dateButton} onPress={() => setShowDatePicker(true)}>
-        <Text style={styles.dateButtonText}>
-          {dueDate ? `📅 Due: ${dueDate.toDateString()}` : "Set Due Date"}
-        </Text>
-      </TouchableOpacity>
 
-      {showDatePicker && (
-        <DateTimePicker
-          value={dueDate || new Date()}
-          mode="date"
-          display="default"
-          onChange={(event, selectedDate) => {
-            setShowDatePicker(Platform.OS === "ios");
-            if (selectedDate) setDueDate(selectedDate);
-          }}
+      <View style={styles.notificationContainer}>
+        <Text style={styles.label}>Enable Notifications</Text>
+        <Switch
+          value={notificationsEnabled}
+          onValueChange={setNotificationsEnabled}
+          trackColor={{ false: "#767577", true: "#E2D1F9" }}
+          thumbColor={notificationsEnabled ? "#5a189a" : "#f4f3f4"}
         />
-      )}
+      </View>
 
       <View style={styles.buttonRow}>
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: "#BAE1FF" }]} onPress={handleAdd}>
+        <TouchableOpacity 
+          style={[styles.actionButton, { backgroundColor: "#BAE1FF" }]} 
+          onPress={handleAdd}
+        >
           <Text style={styles.actionText}>Add Task</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: "#FF6B6B" }]} onPress={onClose}>
+        <TouchableOpacity 
+          style={[styles.actionButton, { backgroundColor: "#FF6B6B" }]} 
+          onPress={onClose}
+        >
           <Text style={styles.actionText}>Cancel</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    marginBottom: 20,
-    backgroundColor: "#FFF0F6",
-    padding: 20,
-    borderRadius: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#E2D1F9",
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 16,
-    backgroundColor: "white",
-    color: "#333",
-  },
-  label: {
-    fontWeight: "600",
-    marginBottom: 6,
-    fontSize: 14,
-    color: "#555",
-  },
-  priorityContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  priorityButton: {
-    flex: 1,
-    paddingVertical: 8,
-    marginHorizontal: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#999",
-    alignItems: "center",
-    backgroundColor: "#fff",
-  },
-  prioritySelected: {
-    backgroundColor: "#CDB4DB",
-    borderColor: "#A36FAF",
-  },
-  priorityText: {
-    color: "#444",
-    fontWeight: "500",
-  },
-  prioritySelectedText: {
-    color: "white",
-    fontWeight: "700",
-  },
-  dateButton: {
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: "#E2D1F9",
-    marginBottom: 16,
-    alignItems: "center",
-  },
-  dateButtonText: {
-    color: "#333",
-    fontWeight: "600",
-  },
-  buttonRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  actionButton: {
-    flex: 1,
-    marginHorizontal: 5,
-    borderRadius: 14,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  actionText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 15,
-  },
-});
 
 export default AddTask;
